@@ -1,29 +1,10 @@
 import os
+import re
 from pathlib import Path
 import pandas as pd
 
-#  TODO - need to work on class dataset
 
-
-class Dataset:
-
-    def __init__(self):
-        pass
-
-    def get_subject_list(self):
-        pass
-
-    def load_subject_data(self):
-        pass
-
-    def preprocess_subject_data(self):
-        pass
-
-    def save_preprocessed_data(self):
-        pass
-
-
-class Pp:
+class Participant:
 
     def __init__(self):
         self.pp = None
@@ -32,7 +13,7 @@ class Pp:
         self.sample_list = []
         self.ch0_HE = []
         self.ch1_lhe = []
-        self.ch2_rh3 = []
+        self.ch2_rhe = []
         self.ch3_LE = []
         self.ch4_A2 = []
         self.ch5_MiPf = []
@@ -62,7 +43,7 @@ class Pp:
         self.ch29_RMOc = []
         self.ch30_MiOc = []
         self.event_list = []
-        self.chan_list = [self.ch0_HE, self.ch1_lhe, self.ch2_rh3, self.ch3_LE, self.ch4_A2, self.ch5_MiPf,
+        self.chan_list = [self.ch0_HE, self.ch1_lhe, self.ch2_rhe, self.ch3_LE, self.ch4_A2, self.ch5_MiPf,
                           self.ch6_LLPf, self.ch7_RLPf, self.ch8_LMPf, self.ch9_RMPf, self.ch10_LDFr, self.ch11_RDFr,
                           self.ch12_LMFr, self.ch13_RMFr, self.ch14_LLFr, self.ch15_RLFr, self.ch16_LMCe,
                           self.ch17_RMCe, self.ch18_LDCe, self.ch19_RDCe, self.ch20_MiCe, self.ch21_MiPa,
@@ -70,24 +51,32 @@ class Pp:
                           self.ch27_RLOc, self.ch28_LMOc, self.ch29_RMOc, self.ch30_MiOc, self.event_list]
 
     def load_raw_data_file(self, participant):
-        self.pp = participant.strip('ec_normalized.txt')
-        print("Loading raw data file for {}...".format(self.pp))
+        pp_num = re.search(r'\d+', participant)
+        if pp_num:
+            self.pp = pp_num.group()
+        print("Loading raw data file for Pp {}...".format(self.pp))
         if participant[0] != '_':
             self.filepath = participant
             with open(self.filepath, 'r') as f:
                 for line in f.readlines():
-                    self.sample_list = line.split()
+                    self.sample_list.append(line.split())
 
     def preprocess_raw_data(self):
         print('Reformatting data for Pp {}...'.format(self.pp))
-        for i in range(len(self.chan_list)):
-            uv = float(self.sample_list[i])
-            rounded_uv = "{:.6f}".format(uv)
-            self.chan_list[i].append(rounded_uv)
+        k = 0
+        for i in range(len(self.sample_list)):
+            for j in range(len(self.sample_list[i])):
+                uv = float(self.sample_list[i][j])
+                rounded_uv = "{:.6f}".format(uv)
+                self.chan_list[k].append(rounded_uv)
+                k += 1
+                if k == 32:
+                    k = 0
 
     def save_preprocessed_data(self):
-        print("Saving preprocessed data for {}...".format(self.pp))
-        self.data = pd.DataFrame({'ch0_HE': self.ch0_HE, 'ch1_lhe': self.ch1_lhe, 'ch2_rh3': self.ch2_rh3,
+        print("Saving preprocessed data for Pp {}...".format(self.pp))
+
+        self.data = pd.DataFrame({'ch0_HE': self.ch0_HE, 'ch1_lhe': self.ch1_lhe, 'ch2_rhe': self.ch2_rhe,
                                   'ch3_LE': self.ch3_LE, 'ch4_A2': self.ch4_A2, 'ch5_MiPf': self.ch5_MiPf,
                                   'ch6_LLPf': self.ch6_LLPf, 'ch7_RLPf': self.ch7_RLPf,
                                   'ch8_LMPf': self.ch8_LMPf, 'ch9_RMPf': self.ch9_RMPf, 'ch10_LDF': self.ch10_LDFr,
@@ -118,16 +107,4 @@ def get_data_list():
         if file[0] != '_':
             file_list.append(filepath)
     return file_list
-
-
-def main():
-    file_list = get_data_list()
-    for participant in file_list:
-        pp = Pp()
-        pp.load_raw_data_file(participant)
-        pp.preprocess_raw_data()
-        pp.save_preprocessed_data()
-
-
-main()
 
