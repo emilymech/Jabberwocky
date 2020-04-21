@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 import pandas as pd
 
-#  TODO - need to make sure that the Pp class is only loading in the data for one participant at a time
 #  TODO - need to work on class dataset
 
 
@@ -30,6 +29,7 @@ class Pp:
         self.pp = None
         self.data = None
         self.filepath = None
+        self.sample_list = []
         self.ch0_HE = []
         self.ch1_lhe = []
         self.ch2_rh3 = []
@@ -69,30 +69,24 @@ class Pp:
                           self.ch22_LLTe, self.ch23_RLTe, self.ch24_LDPa, self.ch25_RDPa, self.ch26_LLOc,
                           self.ch27_RLOc, self.ch28_LMOc, self.ch29_RMOc, self.ch30_MiOc, self.event_list]
 
-    def load_raw_data_file(self):
-        pass
-        # absolute_path = Path(__file__).parent.absolute()
-        # tmp_path = absolute_path.strip('src')
-        # path = '{}{}'.format(tmp_path, 'data/raw')
-        # files = os.listdir(path)
-        # for file in files:
-        #     self.filepath = os.path.join(path, file)
-        #     self.pp = file.strip('ec_normalized.txt')
-        #     if file[0] != '_':
-        #         self.file_list.append(self.filepath)
+    def load_raw_data_file(self, participant):
+        self.pp = participant.strip('ec_normalized.txt')
+        print("Loading raw data file for {}...".format(self.pp))
+        if participant[0] != '_':
+            self.filepath = participant
+            with open(self.filepath, 'r') as f:
+                for line in f.readlines():
+                    self.sample_list = line.split()
 
     def preprocess_raw_data(self):
-        print('Reformatting data for Pp {}'.format(self.pp))
-        with open(self.filepath, 'r') as f:
-            for line in f.readlines():
-                sample_list = line.split()
-
-                for i in range(len(self.chan_list)):
-                    uv = float(sample_list[i])
-                    rounded_uv = "{:.6f}".format(uv)
-                    self.chan_list[i].append(rounded_uv)
+        print('Reformatting data for Pp {}...'.format(self.pp))
+        for i in range(len(self.chan_list)):
+            uv = float(self.sample_list[i])
+            rounded_uv = "{:.6f}".format(uv)
+            self.chan_list[i].append(rounded_uv)
 
     def save_preprocessed_data(self):
+        print("Saving preprocessed data for {}...".format(self.pp))
         self.data = pd.DataFrame({'ch0_HE': self.ch0_HE, 'ch1_lhe': self.ch1_lhe, 'ch2_rh3': self.ch2_rh3,
                                   'ch3_LE': self.ch3_LE, 'ch4_A2': self.ch4_A2, 'ch5_MiPf': self.ch5_MiPf,
                                   'ch6_LLPf': self.ch6_LLPf, 'ch7_RLPf': self.ch7_RLPf,
@@ -113,22 +107,26 @@ class Pp:
 
 
 def get_data_list():
+    print("Getting data list...")
     file_list = []
     absolute_path = Path(__file__).parent.absolute()
-    tmp_path = absolute_path.strip('src')
+    tmp_path = str(absolute_path).strip('src')
     path = '{}{}'.format(tmp_path, 'data/raw')
     files = os.listdir(path)
     for file in files:
         filepath = os.path.join(path, file)
         if file[0] != '_':
             file_list.append(filepath)
+    return file_list
 
 
 def main():
-    data = Pp()
-    data.load_raw_data_file()
-    data.preprocess_raw_data()
-    data.save_preprocessed_data()
+    file_list = get_data_list()
+    for participant in file_list:
+        pp = Pp()
+        pp.load_raw_data_file(participant)
+        pp.preprocess_raw_data()
+        pp.save_preprocessed_data()
 
 
 main()
