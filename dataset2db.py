@@ -5,12 +5,13 @@ from src.dataset import Participant
 
 
 VERBOSE = False
-absolute_path = Path(__file__).parent.absolute()
-path = '{}{}'.format(absolute_path, '/data/raw')
+ABS_PATH = Path(__file__).parent.absolute()
+DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
 
 
 def get_data_list():
     print("Getting data list...")
+    path = '{}{}'.format(ABS_PATH, '/data/raw')
     file_list = []
     files = os.listdir(path)
     for file in files:
@@ -21,8 +22,7 @@ def get_data_list():
 
 
 def data_to_database(file_list):
-    db_name = f'{absolute_path}{"/reformatted_data.sqlite"}'
-    conn = sqlite3.connect(db_name)
+    conn = sqlite3.connect(DB)
     c = conn.cursor()
 
     try:
