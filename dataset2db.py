@@ -11,8 +11,8 @@ def get_data_list():
     print("Getting data list...")
     file_list = []
     absolute_path = Path(__file__).parent.absolute()
-    tmp_path = str(absolute_path).strip('src')
-    path = '{}{}'.format(tmp_path, '/data/raw')
+    path = '{}{}'.format(absolute_path, '/data/raw')
+    print(path)
     files = os.listdir(path)
     for file in files:
         filepath = os.path.join(path, file)
