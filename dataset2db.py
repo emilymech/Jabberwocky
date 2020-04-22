@@ -5,14 +5,13 @@ from src.dataset import Participant
 
 
 VERBOSE = False
+absolute_path = Path(__file__).parent.absolute()
+path = '{}{}'.format(absolute_path, '/data/raw')
 
 
 def get_data_list():
     print("Getting data list...")
     file_list = []
-    absolute_path = Path(__file__).parent.absolute()
-    path = '{}{}'.format(absolute_path, '/data/raw')
-    print(path)
     files = os.listdir(path)
     for file in files:
         filepath = os.path.join(path, file)
@@ -23,7 +22,7 @@ def get_data_list():
 
 def data_to_database(file_list):
     # create database
-    db_name = 'reformatted_data.sqlite'
+    db_name = f'{absolute_path}{"/reformatted_data.sqlite"}'
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
 
@@ -44,7 +43,7 @@ def data_to_database(file_list):
     for participant in file_list:
         pp = Participant()
         pp.load_raw_data_file(participant)
-        pp.preprocess_raw_data()
+        pp.reformat_raw_data()
 
         print(f"Adding values to database for Pp {pp.pp}")
 

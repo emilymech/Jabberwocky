@@ -59,7 +59,7 @@ class Participant:
                 for line in f.readlines():
                     self.sample_list.append(line.split())
 
-    def preprocess_raw_data(self):
+    def reformat_raw_data(self):
         print('Reformatting data for Pp {}...'.format(self.pp))
         for i in range(len(self.sample_list)):
             for j in range(len(self.sample_list[i])):

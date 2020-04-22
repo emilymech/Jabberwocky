@@ -4,3 +4,4 @@ venv
 text/*
 data/*
 output/*
+.sqlite
