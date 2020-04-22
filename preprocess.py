@@ -10,6 +10,7 @@ SR = 250
 
 
 class Preprocess:
+
     def __init__(self):
         self.data = None
 
@@ -24,14 +25,9 @@ class Preprocess:
             col_names = data.index[0]
             no_header = data.iloc[:, -0]
             print(col_names)
-            #  Get a list of Channels
             ch_names = [col_names]
-            #  Create the info structure needed by MNE
-            info = mne.create_info(ch_names, SR)
-            #  Finally, create the Raw object
-            raw = mne.io.RawArray(no_header, info)
-
-            #  Plot it!
+            info = mne.create_info(ch_names, SR)  # Create the info structure needed by MNE
+            raw = mne.io.RawArray(no_header, info)  # create the Raw object
             raw.plot()
 
 
