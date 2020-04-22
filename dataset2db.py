@@ -21,7 +21,6 @@ def get_data_list():
 
 
 def data_to_database(file_list):
-    # create database
     db_name = f'{absolute_path}{"/reformatted_data.sqlite"}'
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
