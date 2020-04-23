@@ -32,6 +32,8 @@ class PpPreprocess:
         self.stronger_reject_criteria = None
         self.flat_criteria = None
         self.epochs = None
+        self.ecg_inds = None
+        self.scores = None
         self.connection = sqlite3.connect(DB)
 
     def get_chan_pp_lists(self):
@@ -45,11 +47,36 @@ class PpPreprocess:
         print(f'Getting Pp {participant} from database...')
         rows = cursor.fetchall()
         print(f'Finished getting Pp {participant} from database')
+
         data_array = np.array(rows)
         data = data_array.transpose()
-        data = data[1:33]
+        data = data[1:33, :]
+
         info = mne.create_info(self.chan_list, SR, ch_types='eeg')  # Create the info structure needed by MNE
         self.raw = mne.io.RawArray(data, info=info)  # create the Raw object
+        self.raw.pick_types(meg=False, eeg=True, eog=True)
+        self.raw.set_channel_types(mapping={'ch0_HE': 'eog', 'ch1_lhe': 'eog', 'ch2_rhe': 'eog', 'ch3_LE': 'eog'})
+
+    def plot_raw(self):
+        self.raw.plot(block=True, scalings='auto', n_channels=31)  # lowpass=30
+        # loc_file = f'{ABS_PATH}/{"data/info_files"}{"oldsystem_locs.loc"}'
+        # montage = mne.channels.read_montage(loc_file, ch_names=self.chan_list, path=None, unit='m', transform=False)
+        # print(montage)
+
+    def re_reference(self):
+        # tutorial: https://github.com/mne-tools/mne-python/blob/master/tutorials/preprocessing/
+        #           plot_55_setting_eeg_reference.py
+
+        # get rid of the default average reference
+        raw_no_ref, _ = mne.set_eeg_reference(self.raw, [])
+
+        # add new reference channel (all zero) (because A1 is not saved in the recording - this will be flat)
+        raw_new_ref = mne.add_reference_channels(self.raw, ref_channels=['ch99_A1'])
+        # raw_new_ref.plot(block=True, scalings='auto', n_channels=31)
+
+        # set reference to average of A1 and A2
+        raw_new_ref.set_eeg_reference(ref_channels=['ch4_A2'])
+        # raw_new_ref.plot(block=True, scalings='auto', n_channels=31)
 
     def get_events(self):
         print('Getting events...')
@@ -82,7 +109,7 @@ class PpPreprocess:
         print(self.epochs.drop_log)
 
     def eog(self):
-        fig = self.raw.plot()
+        fig = self.raw.plot(block=True, scalings='auto', n_channels=31)
         fig.canvas.key_press_event('a')
 
         eog_events = mne.preprocessing.find_eog_events(self.raw, ch_name='ch1_lhe', reject_by_annotation=False)
@@ -93,8 +120,9 @@ class PpPreprocess:
                                       orig_time=self.raw.info['meas_date'])
         self.raw.set_annotations(blink_annot)
 
-        eeg_picks = mne.pick_types(self.raw.info, meg=False, eeg=True)
-        self.raw.plot(events=eog_events, order=eeg_picks)
+        eeg_picks = mne.pick_types(self.raw.info, meg=False, eeg=True, eog=True)
+
+        self.raw.plot(block=True, scalings='auto', n_channels=31, events=eog_events, order=eeg_picks)
 
         self.reject_criteria = dict(eeg=100e-6,  # 100 µV
                                     eog=200e-6)  # 200 µV
@@ -135,59 +163,32 @@ class PpPreprocess:
         # plot interpolated (previous bads)
         evoked.plot(exclude=[], time_unit='s')
 
-    def re_reference(self):
-        picks = mne.pick_types(raw.info, meg=False, eeg=True, eog=True, exclude='bads')
-        reject = dict(eog=150e-6)
-        epochs_params = dict(events=events, event_id=event_id, tmin=tmin, tmax=tmax,
-                             picks=picks, reject=reject, proj=True)
-
-        fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, sharex=True)
-
-        # We first want to plot the data without any added reference (i.e., using only
-        # the reference that was applied during recording of the data).
-        # However, this particular data already has an average reference projection
-        # applied that we now need to remove again using :func:`mne.set_eeg_reference`
-        raw, _ = mne.set_eeg_reference(raw, [])  # use [] to remove average projection
-        evoked_no_ref = mne.Epochs(raw, **epochs_params).average()
-
-        evoked_no_ref.plot(axes=ax1, titles=dict(eeg='Original reference'), show=False,
-                           time_unit='s')
-
-        # Now we want to plot the data with an average reference, so let's add the
-        # projection we removed earlier back to the data. Note that we can use
-        # "set_eeg_reference" as a method on the ``raw`` object as well.
-        raw.set_eeg_reference('average', projection=True)
-        evoked_car = mne.Epochs(raw, **epochs_params).average()
-
-        evoked_car.plot(axes=ax2, titles=dict(eeg='Average reference'), show=False,
-                        time_unit='s')
-
-        # Re-reference from an average reference to the mean of channels EEG 001 and
-        # EEG 002.
-        raw.set_eeg_reference(['EEG 001', 'EEG 002'])
-        evoked_custom = mne.Epochs(raw, **epochs_params).average()
-
-        evoked_custom.plot(axes=ax3, titles=dict(eeg='Custom reference'),
-                           time_unit='s')
-
     def ica(self):
         ica = ICA(n_components=0.95, method='fastica').fit(self.epochs)
 
         ecg_epochs = create_ecg_epochs(self.raw, tmin=-.5, tmax=.5)
-        ecg_inds, scores = ica.find_bads_ecg(ecg_epochs)
+        self.ecg_inds, self.scores = ica.find_bads_ecg(ecg_epochs)
 
-        ica.plot_components(ecg_inds)
-        ica.plot_properties(self.epochs, picks=ecg_inds)
+        ica.plot_components(self.ecg_inds)
+        ica.plot_properties(self.epochs, picks=self.ecg_inds)
 
     def filter(self):
-        self.raw.filter(1, 30, fir_design='firwin')
+        self.raw.filter_data(self.raw, sfreq=SR, l_freq =1, h_freq=30, fir_design='firwin')
+        self.raw.plot()
 
 
 def main():
     data = PpPreprocess()
     data.get_chan_pp_lists()
     data.get_raw_data('04')
+    data.plot_raw()
+    data.re_reference()
+    # data.interpolate()
     data.eog()
+    # data.ica()
+    # data.heartbeat()
+    data.filter()
+    # data.sixty_hertz()
     data.get_events()
     data.epoch_data()
 
