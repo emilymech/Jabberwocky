@@ -2,19 +2,20 @@ import numpy as np
 from pathlib import Path
 import sqlite3
 import mne
-# import os
-# from datetime import timedelta
 
 
 # TODO - Need to figure out a way to allow multiple triggers to be epoched in epoch_data
-# TODO - Figure out what is wrong with the loaded raw data
-# TODO - Add plotting capabilities for each processing step
+# TODO - Check on filter type
+# TODO - need to add grand average functionality (save Pp to processed data)
+# TODO - figure out what's up with the scale on the plots
 
 ABS_PATH = Path(__file__).parent.absolute()
 DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
+single_participant_demo = False
 
 
 SR = 250  # Sampling Rate in Hz
+
 
 
 class PpPreprocess:
@@ -25,6 +26,7 @@ class PpPreprocess:
         self.chan_list = None
         self.participant_list = None
         self.events = None
+        self.event_list = None
         self.all_events_dict = None
         self.event_dict = {}
         self.raw = None
@@ -34,13 +36,15 @@ class PpPreprocess:
         self.epochs = None
         self.ecg_inds = None
         self.scores = None
+        self.N400_electrodes = None
+        self.noun_condition = None
+        self.verb_condition = None
         self.connection = sqlite3.connect(DB)
 
     def get_chan_pp_lists(self):
         cursor = self.connection.execute('select * from data_table')
         self.db_header = list(map(lambda x: x[0], cursor.description))
         self.chan_list = self.db_header[1:33]
-        self.participant_list = self.db_header[0]
 
     def get_raw_data(self, participant):
         cursor = self.connection.execute('select * from data_table where pp_list=?', (participant,))
@@ -58,7 +62,7 @@ class PpPreprocess:
         self.raw.set_channel_types(mapping={'ch0_HE': 'eog', 'ch1_lhe': 'eog', 'ch2_rhe': 'eog', 'ch3_LE': 'eog'})
 
     def plot_raw(self):
-        self.raw.plot(block=True, scalings='auto', n_channels=31)  # lowpass=30
+        self.raw.plot(block=True, scalings='auto', n_channels=31, title="Raw Data")  # lowpass=30
         # loc_file = f'{ABS_PATH}/{"data/info_files"}{"oldsystem_locs.loc"}'
         # montage = mne.channels.read_montage(loc_file, ch_names=self.chan_list, path=None, unit='m', transform=False)
         # print(montage)
@@ -78,9 +82,45 @@ class PpPreprocess:
         raw_new_ref.set_eeg_reference(ref_channels=['ch4_A2'])
         # raw_new_ref.plot(block=True, scalings='auto', n_channels=31)
 
+    def filter(self):
+        self.raw.filter(1, 30., fir_design='firwin')
+        self.raw.plot(block=True, scalings='auto', n_channels=31, title="Filtered Data")
+
+    def artifact_reject(self):
+        eog_events = mne.preprocessing.find_eog_events(self.raw, reject_by_annotation=True)
+        onsets = eog_events[:, 0] / self.raw.info['sfreq'] - 0.25
+        durations = [0.5] * len(eog_events)
+        descriptions = ['bad blink'] * len(eog_events)
+        blink_annot = mne.Annotations(onsets, durations, descriptions,
+                                      orig_time=self.raw.info['meas_date'])
+        self.raw.set_annotations(blink_annot)
+
+        eeg_picks = mne.pick_types(self.raw.info, meg=False, eeg=True, eog=True, exclude='bads')
+
+        fig = self.raw.plot(block=True, scalings='auto', n_channels=31, events=eog_events,
+                            order=eeg_picks, title="Auto-Rejected Data")
+        fig.canvas.key_press_event('a')
+
+        interactive_annot = self.raw.annotations
+
+        self.raw.set_annotations(blink_annot + interactive_annot)
+
+        average_eog = mne.preprocessing.create_eog_epochs(self.raw).average()
+        print('We found %i EOG events' % average_eog.nave)
+        average_eog.plot()
+
+        # possible arguments for Epochs if want to do additional quick and dirty reject in get events
+        self.reject_criteria = dict(eeg=100e-6,  # 100 µV
+                                    eog=200e-6)  # 200 µV
+
+        self.stronger_reject_criteria = dict(eeg=100e-6,  # 100 µV
+                                             eog=100e-6)  # 100 µV
+
+        self.flat_criteria = dict(eeg=1e-6)  # 1 µV
+
     def get_events(self):
         print('Getting events...')
-        self.events = mne.find_events(self.raw, stim_channel='event_list')
+        self.events = mne.find_events(self.raw, stim_channel='event_list', shortest_event=1, verbose=False)
         self.all_events_dict = {'Congruent Unambiguous Words': [71, 72], 'Congruent Ambiguous Words': [73, 74],
                                 'Jabberwocky Unambiguous Words': [81, 82], 'Jabberwocky Ambiguous Words': [83, 84],
                                 'Random Unambiguous Words': [91, 92], 'Random Ambiguous Words': [93, 94],
@@ -91,7 +131,8 @@ class PpPreprocess:
                                 'Random Unambiguous Nouns': 91, 'Random Unambiguous Verbs': 92,
                                 'Random Ambiguous Nouns': 93, 'Random Ambiguous Verbs': 94,
                                 'all unambiguous words': [71, 72, 81, 82, 91, 92],
-                                'all ambiguous words': [73, 74, 83, 84, 93, 94], 'Congruent Words': [71, 72, 73, 74],
+                                'all ambiguous words': [73, 74, 83, 84, 93, 94],
+                                'Congruent Words': [71, 72, 73, 74],
                                 'Jabberwocky Words': [81, 82, 83, 84], 'Random Words': [91, 92, 93, 94]}
 
         self.event_dict = {'Congruent Unambiguous Nouns': 71, 'Congruent Unambiguous Verbs': 72,
@@ -103,94 +144,65 @@ class PpPreprocess:
 
     def epoch_data(self):
         print('Getting epochs...')
-        self.epochs = mne.Epochs(self.raw, self.events, preload=True)
+        self.epochs = mne.Epochs(self.raw, self.events, event_id=self.event_dict, preload=True, tmin=-0.2, tmax=1.0,
+                                 flat=self.flat_criteria, reject_by_annotation=True,)
         self.epochs.plot_drop_log()
         self.epochs.drop_bad()
-        print(self.epochs.drop_log)
+        self.epochs.apply_baseline((-.2, 0))  # baseline correct
 
-    def eog(self):
-        fig = self.raw.plot(block=True, scalings='auto', n_channels=31)
-        fig.canvas.key_press_event('a')
+    def average(self):
+        self.N400_electrodes = ['ch12_LMFr', 'ch13_RMFr', 'ch16_LMCe', 'ch17_RMCe',
+                                'ch20_MiCe', 'ch21_MiPa', 'ch24_LDPa', 'ch25_RDPa']
+        self.noun_condition = ['Congruent Unambiguous Nouns', 'Congruent Ambiguous Nouns',
+                               'Jabberwocky Unambiguous Nouns', 'Jabberwocky Ambiguous Nouns',
+                               'Random Unambiguous Nouns', 'Random Ambiguous Nouns']
+        self.verb_condition = ['Congruent Unambiguous Verbs', 'Congruent Ambiguous Verbs',
+                               'Jabberwocky Unambiguous Verbs', 'Jabberwocky Ambiguous Verbs',
+                               'Random Unambiguous Verbs', 'Random Ambiguous Verbs']
 
-        eog_events = mne.preprocessing.find_eog_events(self.raw, ch_name='ch1_lhe', reject_by_annotation=False)
-        onsets = eog_events[:, 0] / self.raw.info['sfreq'] - 0.25
-        durations = [0.5] * len(eog_events)
-        descriptions = ['bad blink'] * len(eog_events)
-        blink_annot = mne.Annotations(onsets, durations, descriptions,
-                                      orig_time=self.raw.info['meas_date'])
-        self.raw.set_annotations(blink_annot)
+        all_evokeds = dict((cond, self.epochs[cond].average()) for cond in self.event_dict)
 
-        eeg_picks = mne.pick_types(self.raw.info, meg=False, eeg=True, eog=True)
-
-        self.raw.plot(block=True, scalings='auto', n_channels=31, events=eog_events, order=eeg_picks)
-
-        self.reject_criteria = dict(eeg=100e-6,  # 100 µV
-                                    eog=200e-6)  # 200 µV
-
-        self.stronger_reject_criteria = dict(eeg=100e-6,  # 100 µV
-                                             eog=100e-6)  # 100 µV
-
-        self.flat_criteria = dict(eeg=1e-6)  # 1 µV
-
-    def sixty_hertz(self):
-        fig = self.raw.plot_psd(tmax=np.inf, fmax=250, average=True)
-        # add some arrows at 60 Hz and its harmonics:
-        for ax in fig.axes[:2]:
-            freqs = ax.lines[-1].get_xdata()
-            psds = ax.lines[-1].get_ydata()
-            for freq in (60, 120, 180, 240):
-                idx = np.searchsorted(freqs, freq)
-                ax.arrow(x=freqs[idx], y=psds[idx] + 18, dx=0, dy=-12, color='red',
-                         width=0.1, head_width=3, length_includes_head=True)
-
-    def heartbeat(self):
-        ecg_epochs = mne.preprocessing.create_ecg_epochs(self.raw)
-        ecg_epochs.plot_image(combine='mean')
-        avg_ecg_epochs = ecg_epochs.average()
-        avg_ecg_epochs.plot_topomap(times=np.linspace(-0.05, 0.05, 11))
-        avg_ecg_epochs.plot_joint(times=[-0.25, -0.025, 0, 0.025, 0.25])
-
-    def interpolate(self):
-        evoked = mne.read_evokeds(self.raw, condition='Congruent Unambiguous Nouns',
-                                  baseline=(None, 0))
-
-        # plot with bads
-        evoked.plot(exclude=[], time_unit='s')
-
-        # compute interpolation (also works with Raw and Epochs objects)
-        evoked.interpolate_bads(reset_bads=False, verbose=False)
-
-        # plot interpolated (previous bads)
-        evoked.plot(exclude=[], time_unit='s')
-
-    def ica(self):
-        ica = ICA(n_components=0.95, method='fastica').fit(self.epochs)
-
-        ecg_epochs = create_ecg_epochs(self.raw, tmin=-.5, tmax=.5)
-        self.ecg_inds, self.scores = ica.find_bads_ecg(ecg_epochs)
-
-        ica.plot_components(self.ecg_inds)
-        ica.plot_properties(self.epochs, picks=self.ecg_inds)
-
-    def filter(self):
-        self.raw.filter_data(self.raw, sfreq=SR, l_freq =1, h_freq=30, fir_design='firwin')
-        self.raw.plot()
+        # noun_epochs = self.epochs[self.noun_condition].average(picks=self.N400_electrodes)
+        # verb_epochs = self.epochs[self.verb_condition].average(picks=self.N400_electrodes)
+        # noun_epochs.plot_image(group_by=self.N400_electrodes)
+        # verb_epochs.plot_image(group_by=self.N400_electrodes)
+        mne.viz.plot_compare_evokeds(all_evokeds, colors=['lightcoral', 'indianred', 'maroon',
+                                                          'honeydew', 'palegreen', 'darkseagreen',
+                                                          'lightcyan', 'paleturquoise', 'darkslategray',
+                                                          'lavenderblush', 'deeppink', 'mediumvioletred'],
+                                     split_legend=True, picks=self.N400_electrodes)
 
 
 def main():
-    data = PpPreprocess()
-    data.get_chan_pp_lists()
-    data.get_raw_data('04')
-    data.plot_raw()
-    data.re_reference()
-    # data.interpolate()
-    data.eog()
-    # data.ica()
-    # data.heartbeat()
-    data.filter()
-    # data.sixty_hertz()
-    data.get_events()
-    data.epoch_data()
+    if single_participant_demo:
+        data = PpPreprocess()
+        data.get_chan_pp_lists()
+        data.get_raw_data('11')
+        data.plot_raw()
+        data.re_reference()
+        data.filter()
+        data.artifact_reject()
+        data.get_events()
+        data.epoch_data()
+        data.average()
+    else:
+        connection = sqlite3.connect(DB)  # connect to your DB
+        cursor = connection.cursor()  # get a cursor
+        participant_list = [participant[0] for participant in cursor.execute("SELECT pp_list FROM data_table")]
+        participant_set = set(participant_list)
+        print(participant_set)
+
+        for participant in participant_set:
+            data = PpPreprocess()
+            data.get_chan_pp_lists()
+            data.get_raw_data(participant)
+            data.plot_raw()
+            data.re_reference()
+            data.filter()
+            data.artifact_reject()
+            data.get_events()
+            data.epoch_data()
+            data.average()
 
 
 main()
