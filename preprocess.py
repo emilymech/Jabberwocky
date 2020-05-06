@@ -6,16 +6,15 @@ import mne
 
 # TODO - Need to figure out a way to allow multiple triggers to be epoched in epoch_data
 # TODO - Check on filter type
-# TODO - need to add grand average functionality (save Pp to processed data)
+# TODO - somewhere there is an abs value being applied - find it and turn it off!
 # TODO - figure out what's up with the scale on the plots
 
 ABS_PATH = Path(__file__).parent.absolute()
 DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
-single_participant_demo = False
+single_participant_mode = False
 
 
 SR = 250  # Sampling Rate in Hz
-
 
 
 class PpPreprocess:
@@ -34,11 +33,15 @@ class PpPreprocess:
         self.stronger_reject_criteria = None
         self.flat_criteria = None
         self.epochs = None
-        self.ecg_inds = None
         self.scores = None
+        self.nouns = {}
+        self.verbs = {}
+        self.noun_epochs = None
+        self.verb_epochs = None
         self.N400_electrodes = None
         self.noun_condition = None
         self.verb_condition = None
+        self.all_evoked = None
         self.connection = sqlite3.connect(DB)
 
     def get_chan_pp_lists(self):
@@ -62,7 +65,9 @@ class PpPreprocess:
         self.raw.set_channel_types(mapping={'ch0_HE': 'eog', 'ch1_lhe': 'eog', 'ch2_rhe': 'eog', 'ch3_LE': 'eog'})
 
     def plot_raw(self):
-        self.raw.plot(block=True, scalings='auto', n_channels=31, title="Raw Data")  # lowpass=30
+        if single_participant_mode:
+            self.raw.plot(block=True, scalings=dict(eeg=50, eog=50),
+                          n_channels=31, title="Raw Data")
         # loc_file = f'{ABS_PATH}/{"data/info_files"}{"oldsystem_locs.loc"}'
         # montage = mne.channels.read_montage(loc_file, ch_names=self.chan_list, path=None, unit='m', transform=False)
         # print(montage)
@@ -76,15 +81,17 @@ class PpPreprocess:
 
         # add new reference channel (all zero) (because A1 is not saved in the recording - this will be flat)
         raw_new_ref = mne.add_reference_channels(self.raw, ref_channels=['ch99_A1'])
-        # raw_new_ref.plot(block=True, scalings='auto', n_channels=31)
+        # raw_new_ref.plot(block=True, scalings=dict(eeg=50, grad=1e13, mag=1e15, eog=50), n_channels=31)
 
         # set reference to average of A1 and A2
         raw_new_ref.set_eeg_reference(ref_channels=['ch4_A2'])
-        # raw_new_ref.plot(block=True, scalings='auto', n_channels=31)
+        # raw_new_ref.plot(block=True, scalings=dict(eeg=50e-6, grad=1e13, mag=1e15, eog=50e-6), n_channels=31)
 
     def filter(self):
         self.raw.filter(1, 30., fir_design='firwin')
-        self.raw.plot(block=True, scalings='auto', n_channels=31, title="Filtered Data")
+        if single_participant_mode:
+            self.raw.plot(block=True, scalings=dict(eeg=50, eog=50), n_channels=31,
+                          title="Filtered Data")
 
     def artifact_reject(self):
         eog_events = mne.preprocessing.find_eog_events(self.raw, reject_by_annotation=True)
@@ -94,20 +101,19 @@ class PpPreprocess:
         blink_annot = mne.Annotations(onsets, durations, descriptions,
                                       orig_time=self.raw.info['meas_date'])
         self.raw.set_annotations(blink_annot)
+        print("Auto annotations:", self.raw.annotations)
+        print(len(self.raw.annotations))
 
         eeg_picks = mne.pick_types(self.raw.info, meg=False, eeg=True, eog=True, exclude='bads')
-
-        fig = self.raw.plot(block=True, scalings='auto', n_channels=31, events=eog_events,
-                            order=eeg_picks, title="Auto-Rejected Data")
-        fig.canvas.key_press_event('a')
+        if single_participant_mode:
+            fig = self.raw.plot(block=True, scalings=dict(eeg=50,eog=50), n_channels=31,
+                                events=eog_events, order=eeg_picks, title="Auto-Rejected Data")
+            fig.canvas.key_press_event('a')
 
         interactive_annot = self.raw.annotations
-
-        self.raw.set_annotations(blink_annot + interactive_annot)
-
-        average_eog = mne.preprocessing.create_eog_epochs(self.raw).average()
-        print('We found %i EOG events' % average_eog.nave)
-        average_eog.plot()
+        self.raw.set_annotations(interactive_annot)
+        print("Auto and hand annotations:", self.raw.annotations)
+        print(len(self.raw.annotations))
 
         # possible arguments for Epochs if want to do additional quick and dirty reject in get events
         self.reject_criteria = dict(eeg=100e-6,  # 100 µV
@@ -145,12 +151,15 @@ class PpPreprocess:
     def epoch_data(self):
         print('Getting epochs...')
         self.epochs = mne.Epochs(self.raw, self.events, event_id=self.event_dict, preload=True, tmin=-0.2, tmax=1.0,
-                                 flat=self.flat_criteria, reject_by_annotation=True,)
-        self.epochs.plot_drop_log()
-        self.epochs.drop_bad()
-        self.epochs.apply_baseline((-.2, 0))  # baseline correct
+                                 reject_by_annotation=True,)
+        self.epochs.drop_bad()  # if needed can add second pass stronger reject
+
+        if single_participant_mode:
+            self.epochs.plot_drop_log()
+            self.epochs.plot(block=True, scalings=dict(eeg=50, eog=50), n_channels=31, title="Epochs")
 
     def average(self):
+        self.epochs.apply_baseline((-.2, 0))  # baseline correct
         self.N400_electrodes = ['ch12_LMFr', 'ch13_RMFr', 'ch16_LMCe', 'ch17_RMCe',
                                 'ch20_MiCe', 'ch21_MiPa', 'ch24_LDPa', 'ch25_RDPa']
         self.noun_condition = ['Congruent Unambiguous Nouns', 'Congruent Ambiguous Nouns',
@@ -160,24 +169,140 @@ class PpPreprocess:
                                'Jabberwocky Unambiguous Verbs', 'Jabberwocky Ambiguous Verbs',
                                'Random Unambiguous Verbs', 'Random Ambiguous Verbs']
 
-        all_evokeds = dict((cond, self.epochs[cond].average()) for cond in self.event_dict)
+        self.all_evoked = dict((cond, self.epochs[cond].average()) for cond in self.event_dict)
 
-        # noun_epochs = self.epochs[self.noun_condition].average(picks=self.N400_electrodes)
-        # verb_epochs = self.epochs[self.verb_condition].average(picks=self.N400_electrodes)
-        # noun_epochs.plot_image(group_by=self.N400_electrodes)
-        # verb_epochs.plot_image(group_by=self.N400_electrodes)
-        mne.viz.plot_compare_evokeds(all_evokeds, colors=['lightcoral', 'indianred', 'maroon',
-                                                          'honeydew', 'palegreen', 'darkseagreen',
-                                                          'lightcyan', 'paleturquoise', 'darkslategray',
-                                                          'lavenderblush', 'deeppink', 'mediumvioletred'],
-                                     split_legend=True, picks=self.N400_electrodes)
+        for evoked in self.all_evoked:
+            if evoked in self.noun_condition:
+                self.nouns[evoked] = self.all_evoked[evoked]
+            else:
+                self.verbs[evoked] = self.all_evoked[evoked]
+
+        self.noun_epochs = self.epochs[self.noun_condition].average(picks=self.N400_electrodes)
+        self.verb_epochs = self.epochs[self.verb_condition].average(picks=self.N400_electrodes)
+
+    def plot_erps(self):
+        self.noun_epochs.plot_image(group_by=self.N400_electrodes)
+        self.verb_epochs.plot_image(group_by=self.N400_electrodes)
+
+        mne.viz.plot_compare_evokeds(self.all_evoked, invert_y=True,
+                                     colors=['lightcoral', 'indianred', 'maroon',
+                                             'honeydew', 'palegreen', 'darkseagreen',
+                                             'lightcyan', 'paleturquoise', 'darkslategray',
+                                             'lavenderblush', 'deeppink', 'mediumvioletred'],
+                                     split_legend=True, picks=self.N400_electrodes, title="All Conditions",
+                                     )
+
+        mne.viz.plot_compare_evokeds(self.nouns, invert_y=True,
+                                     colors=['indianred', 'maroon', 'palegreen', 'darkseagreen',
+                                             'paleturquoise', 'darkslategray',
+                                             'deeppink', 'mediumvioletred'],
+                                     split_legend=True, picks=self.N400_electrodes, title="Noun Conditions")
+
+        mne.viz.plot_compare_evokeds(self.verbs, invert_y=True,
+                                     colors=['indianred', 'maroon', 'palegreen', 'darkseagreen',
+                                             'paleturquoise', 'darkslategray',
+                                             'deeppink', 'mediumvioletred'],
+                                     split_legend=True, picks=self.N400_electrodes, title="Verb Conditions")
+
+    def evoked_to_list(self, congruent_unambiguous_nouns, congruent_ambiguous_nouns, jabberwocky_unambiguous_nouns,
+                       jabberwocky_ambiguous_nouns, random_unambiguous_nouns, random_ambiguous_nouns,
+                       congruent_unambiguous_verbs, congruent_ambiguous_verbs, jabberwocky_unambiguous_verbs,
+                       jabberwocky_ambiguous_verbs, random_unambiguous_verbs, random_ambiguous_verbs):
+
+        for condition in self.all_evoked:
+            if condition == "Congruent Unambiguous Nouns":
+                congruent_unambiguous_nouns.append(self.all_evoked[condition])
+            elif condition == "Congruent Ambiguous Nouns":
+                congruent_ambiguous_nouns.append(self.all_evoked[condition])
+            elif condition == "Jabberwocky Unambiguous Nouns":
+                jabberwocky_unambiguous_nouns.append(self.all_evoked[condition])
+            elif condition == "Jabberwocky Ambiguous Nouns":
+                jabberwocky_ambiguous_nouns.append(self.all_evoked[condition])
+            elif condition == "Random Unambiguous Nouns":
+                random_unambiguous_nouns.append(self.all_evoked[condition])
+            elif condition == "Random Ambiguous Nouns":
+                random_ambiguous_nouns.append(self.all_evoked[condition])
+
+            elif condition == "Congruent Unambiguous Verbs":
+                congruent_unambiguous_verbs.append(self.all_evoked[condition])
+            elif condition == "Congruent Ambiguous Verbs":
+                congruent_ambiguous_verbs.append(self.all_evoked[condition])
+            elif condition == "Jabberwocky Unambiguous Verbs":
+                jabberwocky_unambiguous_verbs.append(self.all_evoked[condition])
+            elif condition == "Jabberwocky Ambiguous Verbs":
+                jabberwocky_ambiguous_verbs.append(self.all_evoked[condition])
+            elif condition == "Random Unambiguous Verbs":
+                random_unambiguous_verbs.append(self.all_evoked[condition])
+            elif condition == "Random Ambiguous Verbs":
+                random_ambiguous_verbs.append(self.all_evoked[condition])
+
+            else:
+                print("This condition is not going in a list for grand averaging!")
+
+
+def grand_average(congruent_unambiguous_nouns, congruent_ambiguous_nouns, jabberwocky_unambiguous_nouns,
+                  jabberwocky_ambiguous_nouns, random_unambiguous_nouns, random_ambiguous_nouns,
+                  congruent_unambiguous_verbs, congruent_ambiguous_verbs, jabberwocky_unambiguous_verbs,
+                  jabberwocky_ambiguous_verbs, random_unambiguous_verbs, random_ambiguous_verbs):
+
+    congruent_unambiguous_nouns_ga = mne.grand_average(congruent_unambiguous_nouns, interpolate_bads=False,
+                                                       drop_bads=True)
+    congruent_ambiguous_nouns_ga = mne.grand_average(congruent_ambiguous_nouns, interpolate_bads=False,
+                                                     drop_bads=True)
+    jabberwocky_unambiguous_nouns_ga = mne.grand_average(jabberwocky_unambiguous_nouns, interpolate_bads=False,
+                                                         drop_bads=True)
+    jabberwocky_ambiguous_nouns_ga = mne.grand_average(jabberwocky_ambiguous_nouns, interpolate_bads=False,
+                                                       drop_bads=True)
+    random_unambiguous_nouns_ga = mne.grand_average(random_unambiguous_nouns, interpolate_bads=False,
+                                                    drop_bads=True)
+    random_ambiguous_nouns_ga = mne.grand_average(random_ambiguous_nouns, interpolate_bads=False,
+                                                  drop_bads=True)
+
+    noun_ga_dict = {'Congruent_Unambiguous_Nouns': congruent_unambiguous_nouns_ga,
+                    'Congruent_Ambiguous_Nouns': congruent_ambiguous_nouns_ga,
+                    'Jabberwocky_Unambiguous_Nouns': jabberwocky_unambiguous_nouns_ga,
+                    'Jabberwocky_Ambiguous_Nouns': jabberwocky_ambiguous_nouns_ga,
+                    'Random_Unambiguous_Nouns': random_unambiguous_nouns_ga,
+                    'Random_Ambiguous_Nouns': random_ambiguous_nouns_ga}
+
+    congruent_unambiguous_verbs_ga = mne.grand_average(congruent_unambiguous_verbs, interpolate_bads=False,
+                                                       drop_bads=True)
+    congruent_ambiguous_verbs_ga = mne.grand_average(congruent_ambiguous_verbs, interpolate_bads=False,
+                                                     drop_bads=True)
+    jabberwocky_unambiguous_verbs_ga = mne.grand_average(jabberwocky_unambiguous_verbs, interpolate_bads=False,
+                                                         drop_bads=True)
+    jabberwocky_ambiguous_verbs_ga = mne.grand_average(jabberwocky_ambiguous_verbs, interpolate_bads=False,
+                                                       drop_bads=True)
+    random_unambiguous_verbs_ga = mne.grand_average(random_unambiguous_verbs, interpolate_bads=False,
+                                                    drop_bads=True)
+    random_ambiguous_verbs_ga = mne.grand_average(random_ambiguous_verbs, interpolate_bads=False,
+                                                  drop_bads=True)
+
+    verb_ga_dict = {'Congruent_Unambiguous_Verbs': congruent_unambiguous_verbs_ga,
+                    'Congruent_Ambiguous_Verbs': congruent_ambiguous_verbs_ga,
+                    'Jabberwocky_Unambiguous_Verbs': jabberwocky_unambiguous_verbs_ga,
+                    'Jabberwocky_Ambiguous_Verbs': jabberwocky_ambiguous_verbs_ga,
+                    'Random_Unambiguous_Verbs': random_unambiguous_verbs_ga,
+                    'Random_Ambiguous_Verbs': random_ambiguous_verbs_ga}
+
+    mne.viz.plot_compare_evokeds(noun_ga_dict, picks=['ch12_LMFr', 'ch13_RMFr', 'ch16_LMCe', 'ch17_RMCe',
+                                                      'ch20_MiCe', 'ch21_MiPa', 'ch24_LDPa', 'ch25_RDPa'],
+                                 colors=['indianred', 'maroon', 'palegreen', 'darkseagreen','paleturquoise',
+                                         'darkslategray', 'deeppink', 'mediumvioletred'], split_legend=True,
+                                 title="Nouns")
+
+    mne.viz.plot_compare_evokeds(verb_ga_dict, picks=['ch12_LMFr', 'ch13_RMFr', 'ch16_LMCe', 'ch17_RMCe',
+                                                      'ch20_MiCe', 'ch21_MiPa', 'ch24_LDPa', 'ch25_RDPa'],
+                                 colors=['indianred', 'maroon', 'palegreen', 'darkseagreen', 'paleturquoise',
+                                         'darkslategray', 'deeppink', 'mediumvioletred'], split_legend=True,
+                                 title="Verbs")
 
 
 def main():
-    if single_participant_demo:
+    if single_participant_mode:
         data = PpPreprocess()
         data.get_chan_pp_lists()
-        data.get_raw_data('11')
+        data.get_raw_data('06')
         data.plot_raw()
         data.re_reference()
         data.filter()
@@ -185,12 +310,31 @@ def main():
         data.get_events()
         data.epoch_data()
         data.average()
+        data.plot_erps()
+
     else:
+
         connection = sqlite3.connect(DB)  # connect to your DB
         cursor = connection.cursor()  # get a cursor
         participant_list = [participant[0] for participant in cursor.execute("SELECT pp_list FROM data_table")]
         participant_set = set(participant_list)
-        print(participant_set)
+
+
+        congruent_unambiguous_nouns = []
+        congruent_ambiguous_nouns = []
+        jabberwocky_unambiguous_nouns = []
+        jabberwocky_ambiguous_nouns = []
+        random_unambiguous_nouns = []
+        random_ambiguous_nouns = []
+
+        congruent_unambiguous_verbs = []
+        congruent_ambiguous_verbs = []
+        jabberwocky_unambiguous_verbs = []
+        jabberwocky_ambiguous_verbs = []
+        random_unambiguous_verbs = []
+        random_ambiguous_verbs = []
+
+        print("The set of participants to preprocess:", participant_set)
 
         for participant in participant_set:
             data = PpPreprocess()
@@ -203,6 +347,16 @@ def main():
             data.get_events()
             data.epoch_data()
             data.average()
+            data.plot_erps()
+            data.evoked_to_list(congruent_unambiguous_nouns, congruent_ambiguous_nouns, jabberwocky_unambiguous_nouns,
+                                jabberwocky_ambiguous_nouns, random_unambiguous_nouns, random_ambiguous_nouns,
+                                congruent_unambiguous_verbs, congruent_ambiguous_verbs, jabberwocky_unambiguous_verbs,
+                                jabberwocky_ambiguous_verbs, random_unambiguous_verbs, random_ambiguous_verbs)
+
+        grand_average(congruent_unambiguous_nouns, congruent_ambiguous_nouns, jabberwocky_unambiguous_nouns,
+                      jabberwocky_ambiguous_nouns, random_unambiguous_nouns, random_ambiguous_nouns,
+                      congruent_unambiguous_verbs, congruent_ambiguous_verbs, jabberwocky_unambiguous_verbs,
+                      jabberwocky_ambiguous_verbs, random_unambiguous_verbs, random_ambiguous_verbs)
 
 
 main()
