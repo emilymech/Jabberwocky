@@ -3,15 +3,20 @@ from pathlib import Path
 import sqlite3
 import mne
 
+#  TODO - Process all participants by hand
+#  TODO - Save all logs for each participant
+#  TODO - Grand Average All Pp processed data
 
-# TODO - Need to figure out a way to allow multiple triggers to be epoched in epoch_data
-# TODO - Check on filter type
-# TODO - somewhere there is an abs value being applied - find it and turn it off!
-# TODO - figure out what's up with the scale on the plots
 
 ABS_PATH = Path(__file__).parent.absolute()
 DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
-single_participant_mode = False
+SAVE_PATH = f'{ABS_PATH}/data/processed'
+
+single_participant_mode = True
+use_preprocessed_data = False
+SAVE = True
+Pp = '06'
+OVERWRITE = True
 
 
 SR = 250  # Sampling Rate in Hz
@@ -36,8 +41,8 @@ class PpPreprocess:
         self.scores = None
         self.nouns = {}
         self.verbs = {}
-        self.noun_epochs = None
-        self.verb_epochs = None
+        self.noun_evoked = None
+        self.verb_evoked = None
         self.N400_electrodes = None
         self.noun_condition = None
         self.verb_condition = None
@@ -58,19 +63,20 @@ class PpPreprocess:
         data_array = np.array(rows)
         data = data_array.transpose()
         data = data[1:33, :]
+        self.event_list = data[31, :]
+        data[31, :] = abs(data[31, :])
+        print(data[31, :])
 
         info = mne.create_info(self.chan_list, SR, ch_types='eeg')  # Create the info structure needed by MNE
         self.raw = mne.io.RawArray(data, info=info)  # create the Raw object
         self.raw.pick_types(meg=False, eeg=True, eog=True)
-        self.raw.set_channel_types(mapping={'ch0_HE': 'eog', 'ch1_lhe': 'eog', 'ch2_rhe': 'eog', 'ch3_LE': 'eog'})
+        self.raw.set_channel_types(mapping={'ch0_HE': 'eog', 'ch1_lhe': 'eog', 'ch2_rhe': 'eog', 'ch3_LE': 'eog',
+                                            'event_list': 'stim'})
 
     def plot_raw(self):
         if single_participant_mode:
             self.raw.plot(block=True, scalings=dict(eeg=50, eog=50),
                           n_channels=31, title="Raw Data")
-        # loc_file = f'{ABS_PATH}/{"data/info_files"}{"oldsystem_locs.loc"}'
-        # montage = mne.channels.read_montage(loc_file, ch_names=self.chan_list, path=None, unit='m', transform=False)
-        # print(montage)
 
     def re_reference(self):
         # tutorial: https://github.com/mne-tools/mne-python/blob/master/tutorials/preprocessing/
@@ -106,7 +112,7 @@ class PpPreprocess:
 
         eeg_picks = mne.pick_types(self.raw.info, meg=False, eeg=True, eog=True, exclude='bads')
         if single_participant_mode:
-            fig = self.raw.plot(block=True, scalings=dict(eeg=50,eog=50), n_channels=31,
+            fig = self.raw.plot(block=True, scalings=dict(eeg=50, eog=50), n_channels=31,
                                 events=eog_events, order=eeg_picks, title="Auto-Rejected Data")
             fig.canvas.key_press_event('a')
 
@@ -169,7 +175,8 @@ class PpPreprocess:
                                'Jabberwocky Unambiguous Verbs', 'Jabberwocky Ambiguous Verbs',
                                'Random Unambiguous Verbs', 'Random Ambiguous Verbs']
 
-        self.all_evoked = dict((cond, self.epochs[cond].average()) for cond in self.event_dict)
+        self.all_evoked = dict((cond, self.epochs[cond].average(picks=self.N400_electrodes, method="mean"))
+                               for cond in self.event_dict)
 
         for evoked in self.all_evoked:
             if evoked in self.noun_condition:
@@ -177,32 +184,24 @@ class PpPreprocess:
             else:
                 self.verbs[evoked] = self.all_evoked[evoked]
 
-        self.noun_epochs = self.epochs[self.noun_condition].average(picks=self.N400_electrodes)
-        self.verb_epochs = self.epochs[self.verb_condition].average(picks=self.N400_electrodes)
+        self.noun_evoked = self.epochs[self.noun_condition].average(picks=self.N400_electrodes, method="mean")
+        self.verb_evoked = self.epochs[self.verb_condition].average(picks=self.N400_electrodes, method="mean")
 
     def plot_erps(self):
-        self.noun_epochs.plot_image(group_by=self.N400_electrodes)
-        self.verb_epochs.plot_image(group_by=self.N400_electrodes)
+        self.noun_evoked.plot(scalings=dict(eeg=50, eog=50), time_unit='s')
+        self.verb_evoked.plot_image(group_by=self.N400_electrodes)
 
-        mne.viz.plot_compare_evokeds(self.all_evoked, invert_y=True,
-                                     colors=['lightcoral', 'indianred', 'maroon',
-                                             'honeydew', 'palegreen', 'darkseagreen',
-                                             'lightcyan', 'paleturquoise', 'darkslategray',
-                                             'lavenderblush', 'deeppink', 'mediumvioletred'],
-                                     split_legend=True, picks=self.N400_electrodes, title="All Conditions",
-                                     )
+        style_plot = dict(
+            colors=['indianred', 'maroon', 'palegreen', 'darkseagreen', 'paleturquoise', 'darkslategray',
+                    'deeppink', 'mediumvioletred'],
+            split_legend=True,
+            ci=.68,
+            picks='ch20_MiCe',
+        )
 
-        mne.viz.plot_compare_evokeds(self.nouns, invert_y=True,
-                                     colors=['indianred', 'maroon', 'palegreen', 'darkseagreen',
-                                             'paleturquoise', 'darkslategray',
-                                             'deeppink', 'mediumvioletred'],
-                                     split_legend=True, picks=self.N400_electrodes, title="Noun Conditions")
+        mne.viz.plot_compare_evokeds(self.nouns, invert_y=True, title="Noun Conditions", **style_plot)
 
-        mne.viz.plot_compare_evokeds(self.verbs, invert_y=True,
-                                     colors=['indianred', 'maroon', 'palegreen', 'darkseagreen',
-                                             'paleturquoise', 'darkslategray',
-                                             'deeppink', 'mediumvioletred'],
-                                     split_legend=True, picks=self.N400_electrodes, title="Verb Conditions")
+        mne.viz.plot_compare_evokeds(self.verbs, invert_y=True, title="Verb Conditions", **style_plot)
 
     def evoked_to_list(self, congruent_unambiguous_nouns, congruent_ambiguous_nouns, jabberwocky_unambiguous_nouns,
                        jabberwocky_ambiguous_nouns, random_unambiguous_nouns, random_ambiguous_nouns,
@@ -238,6 +237,10 @@ class PpPreprocess:
 
             else:
                 print("This condition is not going in a list for grand averaging!")
+
+    def save_data(self, save, participant, save_path):
+        if save:
+            self.epochs.save(f'{save_path}/{participant}_preprocessed-epo.fif', overwrite=OVERWRITE)
 
 
 def grand_average(congruent_unambiguous_nouns, congruent_ambiguous_nouns, jabberwocky_unambiguous_nouns,
@@ -302,7 +305,7 @@ def main():
     if single_participant_mode:
         data = PpPreprocess()
         data.get_chan_pp_lists()
-        data.get_raw_data('06')
+        data.get_raw_data(Pp)
         data.plot_raw()
         data.re_reference()
         data.filter()
@@ -311,6 +314,7 @@ def main():
         data.epoch_data()
         data.average()
         data.plot_erps()
+        data.save_data(SAVE, Pp, SAVE_PATH)
 
     else:
 
