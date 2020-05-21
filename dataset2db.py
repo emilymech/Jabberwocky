@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from pathlib import Path
-from src.dataset import Participant
+from src.dataset.dataset import Participant
 
 
 VERBOSE = False
@@ -10,8 +10,8 @@ DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
 
 
 def get_data_list():
-    print("Getting data list...")
-    path = '{}{}'.format(ABS_PATH, '/data/raw')
+    print("Getting dataset list...")
+    path = '{}{}'.format(ABS_PATH, '/dataset/raw')
     file_list = []
     files = os.listdir(path)
     for file in files:
