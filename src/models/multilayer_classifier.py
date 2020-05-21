@@ -1,8 +1,6 @@
 import numpy as np
-import classifier
+from src.models import classifier
 from src import config
-import datetime
-import os
 import sys
 import random
 
@@ -34,7 +32,6 @@ class NumpyMultilayerClassifier(classifier.Classifier):
         self.y_h_weight_list = []
         self.h_bias_list = []
         self.h_x_weight_list = []
-        self.full_result_list = None
 
         print("\nTraining Multilayer Classifier of Size {}-{}-{} on {} for {} epochs"
               .format(self.input_size, self.hidden_size, self.output_size, self.dataset.dataset_name, self.num_epochs))
