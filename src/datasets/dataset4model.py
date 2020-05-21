@@ -6,8 +6,11 @@ import datetime
 
 from src import config, my_utils
 
+# TODO - y = syntactically plausible, semantically plausible, noun, verb, ambiguous, x = 250 samples per pp
+# TODO - have this script output a csv for each participant with 2 columns: x and y
 
-class InstanceFeatureDataset:
+
+class JabberwockyDataset:
     def __init__(self):
         self.dataset_type = 'EEG'
         self.dataset_name = None
