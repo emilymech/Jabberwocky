@@ -52,7 +52,7 @@ class Participant:
         pp_num = re.search(r'\d+', participant)
         if pp_num:
             self.pp = pp_num.group()
-        print("Loading raw dataset file for Pp {}...".format(self.pp))
+        print("Loading raw datasets file for Pp {}...".format(self.pp))
         if participant[0] != '_':
             self.filepath = participant
             with open(self.filepath, 'r') as f:
@@ -60,7 +60,7 @@ class Participant:
                     self.sample_list.append(line.split())
 
     def reformat_raw_data(self):
-        print('Reformatting dataset for Pp {}...'.format(self.pp))
+        print('Reformatting datasets for Pp {}...'.format(self.pp))
         for i in range(len(self.sample_list)):
             for j in range(len(self.sample_list[i])):
                 uv = float(self.sample_list[i][j])

@@ -13,7 +13,7 @@ ABS_PATH = Path(__file__).parent.absolute()
 DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
 SAVE_PATH = f'{ABS_PATH}/dataset/processed'
 
-# The total set of participants in the dataset: {4, 6, 7, 8, 9, 11, 13, 15, 16, 17, 18, 20, 21, 22, 23,
+# The total set of participants in the datasets: {4, 6, 7, 8, 9, 11, 13, 15, 16, 17, 18, 20, 21, 22, 23,
 #                                               24, 25, 26, 28, 30, 32, 34, 35, 37}
 
 SAVE = False

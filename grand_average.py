@@ -6,7 +6,7 @@ import re
 
 ABS_PATH = Path(__file__).parent.absolute()
 DB = f'{ABS_PATH}{"/reformatted_data.sqlite"}'
-SAVE_PATH = f'{ABS_PATH}/dataset/output'
+SAVE_PATH = f'{ABS_PATH}/datasets/output'
 
 
 class Average:
@@ -53,15 +53,15 @@ class Average:
         self.verb_ga_dict = None
 
     def load_preprocessed_data(self):
-        print("Loading Preprocessed dataset...")
-        processed_data_path = f'{ABS_PATH}/dataset/processed/'
+        print("Loading Preprocessed datasets...")
+        processed_data_path = f'{ABS_PATH}/datasets/processed/'
         for participant in os.listdir(processed_data_path):
             pp_num = re.search(r'\d+', participant)
             participant_path = f"{processed_data_path}{participant}"
             pp_epochs = mne.read_epochs(participant_path, preload=False)
             self.epoch_list.append(pp_epochs)
             self.participant_list.append(pp_num.group())
-        print("Finished loading preprocessed dataset...")
+        print("Finished loading preprocessed datasets...")
 
     def average_by_pp(self):
         i = 0
@@ -184,12 +184,12 @@ class Average:
 
 
 def main():
-    print("Getting the list of all participants in the dataset...")
+    print("Getting the list of all participants in the datasets...")
     connection = sqlite3.connect(DB)  # connect to your DB
     cursor = connection.cursor()  # get a cursor
     participant_list = [participant[0] for participant in cursor.execute("SELECT pp_list FROM data_table")]
     participant_set = set(participant_list)
-    print("The total set of participants in the dataset:", participant_set)
+    print("The total set of participants in the datasets:", participant_set)
 
     average = Average()
     average.load_preprocessed_data()

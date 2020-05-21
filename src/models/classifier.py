@@ -63,7 +63,7 @@ class Classifier:
     def create_model_config_files(self):
         with open(self.model_path+'/config.txt', 'w') as f:
             f.write("model: {}\n".format(self.model_name))
-            f.write("dataset: {}\n".format(self.dataset.dataset_name))
+            f.write("datasets: {}\n".format(self.dataset.dataset_name))
             f.write("num_categories: {}\n".format(self.dataset.num_categories))
             f.write("num_instances: {}\n".format(self.dataset.num_instances))
             f.write("num_features: {}\n".format(self.dataset.num_features))
