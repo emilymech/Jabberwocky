@@ -5,3 +5,10 @@ text/*
 data/*
 output/*
 .sqlite
+.DS_Store
+/.vscode
+/.idea
+/models
+/corpora
+/datasets
+
